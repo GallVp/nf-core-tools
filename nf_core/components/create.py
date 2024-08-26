@@ -142,6 +142,7 @@ class ComponentCreate(ComponentCommand):
         self.file_paths = self._get_component_dirs()
 
         component_outputs = {}  # output: meta_data
+        is_stub_implemented = False
         if self.migrate_pytest and self.migrate_pytest_hard:
             # Extract outputs data
             main_nf_data = Path(
@@ -157,6 +158,9 @@ class ComponentCreate(ComponentCommand):
                 log.debug(
                     f"Found {len(component_outputs)} outputs in {self.component_name}: {component_outputs.keys()}"
                 )
+
+            # Check if stub is implemented
+            is_stub_implemented = "stub:" in main_nf_data
 
         if self.migrate_pytest:
             # Rename the component directory to old
@@ -188,7 +192,7 @@ class ComponentCreate(ComponentCommand):
 
         # Extract pytest units
         if self.migrate_pytest and self.migrate_pytest_hard:
-            self._extract_pytest_units(component_outputs)
+            self._extract_pytest_units(component_outputs, is_stub_implemented)
 
         # Create component template with jinja2
         assert self._render_template()
@@ -562,7 +566,7 @@ class ComponentCreate(ComponentCommand):
             yaml.dump(yml_file, fh)
         run_prettier_on_file(modules_yml)
 
-    def _extract_pytest_units(self, component_outputs):
+    def _extract_pytest_units(self, component_outputs, is_stub_implemented):
         pytest_dir = Path(self.directory, "tests", self.component_type, self.org, self.component_dir)
         main_nf_contents = Path(pytest_dir, "main.nf").read_text(encoding="UTF-8")
 
@@ -610,16 +614,29 @@ class ComponentCreate(ComponentCommand):
             nf_test_workflow.append({"name": workflow_name.replace("_", "-"), "input": extracted_component_args})
 
         test_units_str = ""
+        stub_test_added = False
         for test in nf_test_workflow:
             test_name = test["name"]
+            input_data_lines = self._make_nf_test_input(test["input"])
             log.debug(f"Scaffolding nf-test '{test_name}'")
 
-            input_data_lines = self._make_nf_test_input(test["input"])
             add_stub_option = "options '-stub'" if "stub" in test_name else ""
+            stub_test_added = stub_test_added or "stub" in test_name
 
-            power_assertions = self._get_power_assertions(component_outputs, is_stub=("stub" in test_name))
+            test_units_str += self._make_nf_test_unit(component_outputs, test_name, input_data_lines, add_stub_option)
 
-            test_unit_str = f"""
+        # Repeat last test as stub test
+        if is_stub_implemented and not stub_test_added:
+            test_units_str += self._make_nf_test_unit(
+                component_outputs, test_name + "-stub", input_data_lines, "options '-stub'"
+            )
+
+        self.pytest_units_str = test_units_str
+
+    def _make_nf_test_unit(self, component_outputs, test_name, input_data_lines, add_stub_option):
+        power_assertions = self._get_power_assertions(component_outputs, is_stub=("stub" in test_name))
+
+        return f"""
     test("{test_name}") {{
         {add_stub_option}
         when {{
@@ -638,9 +655,6 @@ class ComponentCreate(ComponentCommand):
         }}
     }}
     """
-            test_units_str += test_unit_str
-
-        self.pytest_units_str = test_units_str
 
     def _extract_pytest_nxf_symbols(self, workflow_content: str) -> dict[str, str]:
         symbols = {}
