@@ -791,7 +791,7 @@ class ComponentCreate(ComponentCommand):
         if is_stub:
             return power_assertions
 
-        non_stable_outputs = ["bam", "cram", "txt", "log", "rds", "png", "svg", "vcf", "tbi", "zip"]
+        non_stable_outputs = ["bam", "bai", "cram", "txt", "log", "rds", "png", "svg", "vcf", "tbi", "zip"]
 
         outputs_str = " ".join([f"{key} {value}" for (key, value) in component_outputs.items()]).lower()
         has_non_stable = any([ns_output in outputs_str for ns_output in non_stable_outputs])
@@ -802,6 +802,10 @@ class ComponentCreate(ComponentCommand):
         power_assertions = "{ assert snapshot("
         for output_name, output_meta in component_outputs.items():
             if output_name == "versions":
+                continue
+
+            if "bai" in output_name or "bai" in output_meta:
+                power_assertions += f"\n\t\t\t\t\tfile(process.out.{output_name}[0][1]).name,"
                 continue
 
             if "bam" in output_name or "bam" in output_meta:
